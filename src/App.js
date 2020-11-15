@@ -1,5 +1,12 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Button, Box } from "@material-ui/core";
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  Button,
+  Box,
+  FormControl,
+  Radio,
+  RadioGroup,
+  FormControlLabel,
+} from "@material-ui/core";
 
 import "@tensorflow/tfjs";
 import * as bodyPix from "@tensorflow-models/body-pix";
@@ -7,11 +14,10 @@ import * as bodyPix from "@tensorflow-models/body-pix";
 import WebCam from "react-webcam";
 
 const App = () => {
-  const webcamRef = useRef(null);
-
   const [model, setModel] = useState();
-  const [img, setImg] = useState();
-  // const [seg, setSeg] = useState();
+  const [timerId, setTimerId] = useState();
+  const [maskMode, setMaskMode] = useState("person");
+  const [mask, setMask] = useState();
 
   useEffect(() => {
     const params = {
@@ -26,48 +32,85 @@ const App = () => {
     });
   }, []);
 
-  const capture = useCallback(() => {
-    setImg(webcamRef.current.getScreenshot());
-  }, [webcamRef]);
+  useEffect(() => {
+    const webcam = document.getElementById("webcam");
+    const canvas = document.getElementById("canvas");
+    const opacity = 0.7;
 
-  const estimateByVideo = useCallback(() => {
+    bodyPix.drawMask(canvas, webcam, mask, opacity, 0, false);
+  }, [mask]);
+
+  const showResult = useCallback(
+    (seg) => {
+      let foregroundColor;
+      let backgroundColor;
+
+      if (maskMode === "background") {
+        foregroundColor = { r: 0, g: 0, b: 0, a: 0 };
+        backgroundColor = { r: 127, g: 127, b: 127, a: 255 };
+      } else if (maskMode === "person") {
+        foregroundColor = { r: 255, g: 255, b: 255, a: 255 };
+        backgroundColor = { r: 0, g: 0, b: 0, a: 255 };
+      } else {
+        foregroundColor = { r: 0, g: 0, b: 255, a: 0 };
+        backgroundColor = { r: 0, g: 0, b: 255, a: 0 };
+      }
+      setMask(bodyPix.toMask(seg, foregroundColor, backgroundColor, true));
+    },
+    [maskMode]
+  );
+
+  const estimate = useCallback(() => {
     const webcam = document.getElementById("webcam");
     if (!!model) {
       model.segmentPerson(webcam).then((segmentation) => {
         showResult(segmentation);
       });
     }
-  }, [model]);
+  }, [model, showResult]);
 
-  const showResult = useCallback((seg) => {
-    const foregroundColor = { r: 255, g: 255, b: 255, a: 255 };
-    const backgroundColor = { r: 10, g: 10, b: 10, a: 255 };
-    const mask = bodyPix.toMask(seg, foregroundColor, backgroundColor, true);
+  const start = useCallback(() => {
+    if (!!timerId) {
+      clearTimeout(timerId);
+    }
+    setTimerId(
+      setInterval(() => {
+        estimate();
+      }, 100)
+    );
+  }, [estimate, timerId]);
 
-    const webcam = document.getElementById("webcam");
-    const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d");
-    console.log(webcam);
-    console.log(canvas);
-    const opacity = 0.7;
-
-    bodyPix.drawMask(canvas, webcam, mask, opacity, 0, false);
-  }, []);
+  const stop = useCallback(() => {
+    clearInterval(timerId);
+    setTimerId(null);
+  }, [timerId]);
 
   return (
     <>
       <Box>
-        <WebCam
-          id="webcam"
-          ref={webcamRef}
-          width={400}
-          height={300}
-        />
-        <canvas id="canvas"/>
+        <Button onClick={start}>推定</Button>
+        <Button onClick={stop}>停止</Button>
       </Box>
       <Box>
-        <Button onClick={capture}>撮影</Button>
-        <Button onClick={estimateByVideo}>推定</Button>
+        <FormControl>
+          <RadioGroup row value={maskMode} onChange={(e) => setMaskMode(e.target.value)}>
+            <FormControlLabel
+              value="background"
+              control={<Radio />}
+              label="Mask background"
+            />
+            <FormControlLabel
+              value="person"
+              control={<Radio />}
+              label="Mask person"
+            />
+            <FormControlLabel value="no" control={<Radio />} label="No mask" />
+          </RadioGroup>
+        </FormControl>
+      </Box>
+      <Box>
+        <WebCam id="webcam" width={640} height={480} />
+        <canvas id="canvas" width={640} height={480} />
       </Box>
     </>
   );
